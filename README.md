@@ -1,132 +1,141 @@
-# hermes-observational-memory 🐦🧠
+# hermes-observational-memory
 
-**Make long Hermes Agent sessions feel endless.**
+Long Hermes Agent sessions lose context. Each compaction summarises the previous
+summary — a telephone game where project decisions, rejected approaches, and
+hard-won constraints quietly vanish. By the time you notice, rebuilding the lost
+ground costs more turns than the compaction saved.
 
-`hermes-observational-memory` is an advanced context-compression engine and background memory ledger plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent). It maintains a curated observations pool and reflections ledger asynchronously in the background, rendering them deterministically during context compression to ensure important details survive compactions indefinitely.
-
-Based on the [Mastra Observational Memory](https://mastra.ai/blog/observational-memory) architecture and inspired by the `pi-observational-memory` extension.
-
----
-
-## The Problem
-
-Long agent sessions eventually hit a context window wall. Built-in context compressors use lossy summarization over historical turns. Each subsequent compression summarises the previous summary, leading to "telephone-game" context degradation where crucial project details, rejected approaches, and constraints disappear.
-
-`hermes-observational-memory` solves this by introducing a three-actor ledger system that runs incrementally *above* the compaction boundary.
-
-## How It Works
-
-This plugin operates in two layers:
-
-1. **Background Hydration (System Prompt Hook):**
-   Fires on every turn, counting unobserved tokens. When thresholds are reached, it asynchronously dispatches:
-   - **Observer**: Extracts atomic, single-line factual observations from raw turns into an SQLite database.
-   - **Reflector**: Distills active observations into durable, long-lived reflections (preferences, project decisions, constraints).
-   - **Dropper**: Prunes observations that are fully covered by reflections or are redundant, keeping the active pool small.
-
-2. **Deterministic Compaction (Context Engine):**
-   Fires when prompt tokens exceed the threshold (default: 68% of context window). Instead of slow, lossy LLM summarization on the spot, it projects active observations and reflections deterministically into a structured markdown block, ensuring instantaneous and lossless compaction.
+**hermes-observational-memory** keeps a curated ledger of observations and
+reflections in a local SQLite database. When compaction triggers, it projects
+that ledger deterministically into the summary — no LLM call at compaction
+time, no telephone game, no silent loss.
 
 ---
 
-## Installation and Setup
+## Why use this?
 
-### Step 1 — Clone the repository
+- **No silent degradation.** Observations extracted in the background survive
+  every compaction as verbatim facts, not summaries of summaries.
+- **Zero compaction latency.** The compression step is a database read and a
+  markdown render — under 1 ms, no API call.
+- **Incremental background work.** The Observer, Reflector, and Dropper run
+  asynchronously on each turn; they never block the conversation.
+- **Plain SQLite.** The ledger is a local `om_ledger.db` file. Inspect it
+  directly with any SQLite viewer. No external service required.
+- **Drop-in replacement.** One config change activates it; reverting is the
+  same one change back.
 
-```bash
-git clone https://github.com/witt3rd/hermes-observational-memory.git ~/src/ext/hermes-observational-memory
-```
+---
 
-### Step 2 — Wire it into your Hermes profile
+## Getting started
 
-The plugin is loaded from your profile's `plugins/` directory. `HERMES_HOME` is the root of your active profile (typically `~/.hermes` for a default install, or a profile-specific path when using named profiles).
-
-```bash
-# Place (or symlink) the plugin into your profile's plugins directory
-ln -s ~/src/ext/hermes-observational-memory "$HERMES_HOME/plugins/observational-memory"
-```
-
-The `plugins/` directory sits directly under `HERMES_HOME` — the same directory that contains your `config.yaml`. To find the correct path for your active profile:
-
-```bash
-echo $HERMES_HOME
-```
-
-After symlinking, verify Hermes sees the plugin:
+**1. Clone**
 
 ```bash
-hermes plugins list
-# Should show: observational-memory
+git clone https://github.com/witt3rd/hermes-observational-memory.git \
+    ~/src/ext/hermes-observational-memory
 ```
 
-### Step 3 — Enable the plugin in config.yaml
+**2. Symlink into your profile's plugins directory**
 
-Open `$HERMES_HOME/config.yaml` and add two settings:
+```bash
+ln -s ~/src/ext/hermes-observational-memory \
+    "$HERMES_HOME/plugins/observational-memory"
+```
+
+`HERMES_HOME` is the root of your active Hermes profile — the directory that
+contains your `config.yaml`. Verify it with `echo $HERMES_HOME`.
+
+**3. Enable in `config.yaml`**
 
 ```yaml
-# 1. Enable the plugin so Hermes loads it
 plugins:
   enabled:
-    - observational-memory   # add alongside your existing enabled plugins
+    - observational-memory   # alongside your existing plugins
 
-# 2. Tell Hermes to use observational-memory as the active context engine
 context:
   engine: "observational-memory"
 ```
 
-The `context.engine` key selects which engine handles context compression. The default is `"compressor"` (the built-in). Setting it to `"observational-memory"` activates this plugin's `ObservationalMemoryEngine` in its place.
+**4. Restart the gateway**
 
-That is it — start a new Hermes session and the plugin begins tracking observations immediately.
+```bash
+hermes -p <your-profile> gateway run --replace
+```
+
+Errors on load? Check `logs/errors.log` in your profile directory.
 
 ---
 
-## How the Plugin Integrates with Hermes
+## Verifying it's active
 
-This plugin uses two Hermes extension points:
+The ledger file appears at `$HERMES_HOME/om_ledger.db` on the first session
+that uses the engine. Confirm it's there and the session is registered:
 
-| Extension point | What it does |
-|---|---|
-| `register_context_engine(engine)` | Registers `ObservationalMemoryEngine` as the active context compressor, replacing the built-in summariser. |
-| `register_hook("system_prompt", handler)` | Drives the background Observer / Reflector / Dropper passes each turn so the ledger stays current. |
-
-Both are wired in `__init__.py -> register(ctx)`:
-
-```python
-def register(ctx):
-    engine = ObservationalMemoryEngine()
-    ctx.register_context_engine(engine)
-    ctx.register_hook(
-        "system_prompt",
-        system_prompt_handler,
-        description="Drives incremental background observation/reflection for Observational Memory"
-    )
+```bash
+sqlite3 "$HERMES_HOME/om_ledger.db" \
+    "SELECT session_id, compression_count FROM sessions ORDER BY rowid DESC LIMIT 5;"
 ```
 
-Hermes calls `register(ctx)` automatically when it loads the plugin. The `context.engine: "observational-memory"` config key tells Hermes to activate the engine that `register_context_engine` registered.
+When compaction fires, the compressed context will open with:
+
+```
+[CONTEXT COMPACTION — OBSERVATIONAL MEMORY PROJECTED]
+```
+
+rather than the standard LLM-generated summary.
 
 ---
 
-## Verifying the Installation
+## How it works
 
-After starting a session, you can confirm the engine is active:
+Two Hermes extension points, two separate jobs:
 
-```
-/compress
-```
+**Background hydration (`system_prompt` hook — fires every turn)**
 
-If the observational memory engine is live, compaction will produce a block beginning with `[CONTEXT COMPACTION — OBSERVATIONAL MEMORY PROJECTED]` rather than the standard LLM-generated summary.
+Tracks unobserved tokens since the last pass. When thresholds are crossed it
+dispatches three background LLM passes:
 
-The SQLite ledger lives at `$HERMES_HOME/om_ledger.db`. You can inspect it directly to see accumulated observations and reflections.
+- **Observer** — extracts atomic factual observations from raw turns into SQLite
+- **Reflector** — distills active observations into durable, long-lived reflections
+- **Dropper** — prunes observations fully covered by reflections
+
+**Deterministic compaction (`ContextEngine` subclass — fires at threshold)**
+
+At 68% of the context window, `compress()` fetches the current ledger and
+renders it into a structured markdown block. No LLM call. The result replaces
+the lossy summary the built-in compressor would have produced.
+
+---
+
+## Configuration reference
+
+| `config.yaml` key | Default | Description |
+|---|---|---|
+| `context.engine` | `"compressor"` | Set to `"observational-memory"` to activate |
+| `plugins.enabled` | `[]` | Must include `"observational-memory"` |
+
+The observation and reflection thresholds are currently constants in `hook.py`
+(`observe_threshold = 10000`, `reflect_threshold = 20000` tokens since last pass).
 
 ---
 
 ## Uninstalling
 
-To revert to the built-in compressor:
+```bash
+# 1. Revert config.yaml
+sed -i 's/engine: "observational-memory"/engine: compressor/' "$HERMES_HOME/config.yaml"
+sed -i '/- observational-memory/d' "$HERMES_HOME/config.yaml"
 
-1. Remove `context.engine: "observational-memory"` from `config.yaml` (or set it to `"compressor"`).
-2. Remove `observational-memory` from `plugins.enabled`.
-3. Optionally delete the symlink: `rm "$HERMES_HOME/plugins/observational-memory"`.
+# 2. Remove the symlink
+rm "$HERMES_HOME/plugins/observational-memory"
+
+# 3. Restart the gateway
+hermes -p <your-profile> gateway run --replace
+```
+
+The `om_ledger.db` file is left in place. Delete it manually if you want a
+clean slate.
 
 ---
 

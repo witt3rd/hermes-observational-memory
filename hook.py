@@ -41,7 +41,7 @@ def system_prompt_handler(agent: Any, session_id: str, conversation_history: Lis
 
 def _drive_background_memory(db: OMLedgerDB, session_id: str, messages: List[Dict[str, Any]]):
     """Run incremental background passes (Observer, Reflector, Dropper)."""
-    # 1. Check for unobserved messages
+    # Check for unobserved messages
     watermarks = db.get_watermarks(session_id)
     last_observed_id = watermarks.get("last_observed_id")
     raw_obs_clock = watermarks.get("raw_tokens_since_observation", 0)
@@ -101,6 +101,41 @@ def _drive_background_memory(db: OMLedgerDB, session_id: str, messages: List[Dic
         _run_dropper(db, session_id)
 
 
+def _extract_content(response: Any) -> str:
+    """Defensively extract response text from call_llm result."""
+    if not response or not hasattr(response, "choices") or not response.choices:
+        return ""
+    message = response.choices[0].message
+    if isinstance(message, dict):
+        content = message.get("content", "")
+    else:
+        content = getattr(message, "content", "") or ""
+    return str(content).strip()
+
+
+def _extract_json_block(text: str) -> str:
+    """Extract a clean JSON block from LLM output, ignoring preambles/markdown."""
+    text = text.strip()
+    if not text:
+        return ""
+        
+    # 1. Search for markdown code blocks
+    match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+        
+    # 2. Fallback: find the outermost brackets/braces
+    list_match = re.search(r"(\[.*\])", text, re.DOTALL)
+    if list_match:
+        return list_match.group(1).strip()
+        
+    obj_match = re.search(r"(\{.*\})", text, re.DOTALL)
+    if obj_match:
+        return obj_match.group(1).strip()
+        
+    return text
+
+
 def _run_observer(db: OMLedgerDB, session_id: str, messages: List[Dict[str, Any]]):
     """Call auxiliary LLM to extract new factual observations."""
     # Format the transcript slice for the observer
@@ -138,14 +173,14 @@ Respond ONLY with the JSON list. Do not add markdown backticks or preamble.
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1
         )
-        content_text = response.choices[0].message.content.strip()
+        content_text = _extract_content(response)
+        json_text = _extract_json_block(content_text)
         
-        # Clean markdown wrappers if returned
-        if content_text.startswith("```"):
-            content_text = re.sub(r"^```[a-zA-Z]*\n", "", content_text)
-            content_text = re.sub(r"\n```$", "", content_text)
-            
-        observations = json.loads(content_text.strip())
+        if not json_text:
+            logger.warning("Observer returned empty or unparseable text: %s", content_text)
+            return
+
+        observations = json.loads(json_text)
         if isinstance(observations, list) and observations:
             db.add_observations(session_id, observations)
             logger.info("OM: Extracted %d new observations", len(observations))
@@ -198,14 +233,14 @@ Respond ONLY with the JSON list of ALL current reflections (both surviving old o
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1
         )
-        content_text = response.choices[0].message.content.strip()
-        
-        # Clean markdown
-        if content_text.startswith("```"):
-            content_text = re.sub(r"^```[a-zA-Z]*\n", "", content_text)
-            content_text = re.sub(r"\n```$", "", content_text)
+        content_text = _extract_content(response)
+        json_text = _extract_json_block(content_text)
+
+        if not json_text:
+            logger.warning("Reflector returned empty or unparseable text: %s", content_text)
+            return
             
-        reflections = json.loads(content_text.strip())
+        reflections = json.loads(json_text)
         if isinstance(reflections, list):
             db.add_reflections(session_id, reflections)
             logger.info("OM: Updated reflections ledger. Total active reflections: %d", len(reflections))
@@ -260,15 +295,14 @@ Respond ONLY with the JSON object. Do not add markdown backticks.
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1
         )
-        content_text = response.choices[0].message.content.strip()
-        
-        # Clean markdown
-        if content_text.startswith("```"):
-            import re
-            content_text = re.sub(r"^```[a-zA-Z]*\n", "", content_text)
-            content_text = re.sub(r"\n```$", "", content_text)
+        content_text = _extract_content(response)
+        json_text = _extract_json_block(content_text)
+
+        if not json_text:
+            logger.warning("Dropper returned empty or unparseable text: %s", content_text)
+            return
             
-        drop_data = json.loads(content_text.strip())
+        drop_data = json.loads(json_text)
         to_drop = drop_data.get("drop_observation_ids", [])
         if to_drop:
             db.drop_observations(session_id, to_drop)

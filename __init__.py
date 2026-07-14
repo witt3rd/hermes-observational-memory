@@ -21,5 +21,4 @@ def register(ctx):
     ctx.register_hook(
         "system_prompt",
         system_prompt_handler,
-        description="Drives incremental background observation/reflection for Observational Memory"
     )
