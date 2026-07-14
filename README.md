@@ -114,6 +114,23 @@ the lossy summary the built-in compressor would have produced.
 |---|---|---|
 | `context.engine` | `"compressor"` | Set to `"observational-memory"` to activate |
 | `plugins.enabled` | `[]` | Must include `"observational-memory"` |
+| `auxiliary.compression.model` | profile default | Model used for Observer, Reflector, and Dropper passes |
+| `auxiliary.compression.provider` | profile default | Provider for the above |
+
+The background Observer, Reflector, and Dropper each make one LLM call via the
+`auxiliary.compression` model — the same side-channel model Hermes uses for
+built-in context summarisation. Configure it in `config.yaml`:
+
+```yaml
+auxiliary:
+  compression:
+    provider: anthropic
+    model: claude-sonnet-4-6
+```
+
+Each threshold crossing triggers up to three passes (one per actor). With the
+default thresholds (10k / 20k tokens since last pass), this is infrequent in
+normal use, but worth accounting for in cost-sensitive deployments.
 
 The observation and reflection thresholds are currently constants in `hook.py`
 (`observe_threshold = 10000`, `reflect_threshold = 20000` tokens since last pass).
