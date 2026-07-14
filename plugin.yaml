@@ -1,0 +1,8 @@
+name: "observational-memory"
+description: "Maintains a curated observations pool and reflections ledger that survives compactions indefinitely, making long agent sessions feel endless."
+version: "1.0.0"
+author: "Forge ⚒️ & Donald 🧙‍♂️"
+homepage: "https://github.com/witt3rd/hermes-observational-memory"
+requirements:
+  - pyyaml
+  - sqlite3
