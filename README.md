@@ -139,6 +139,15 @@ clean slate.
 
 ---
 
+## Acknowledgments
+
+Based on the [Mastra Observational Memory](https://mastra.ai/blog/observational-memory)
+architecture and inspired by the
+[elpapi42/pi-observational-memory](https://github.com/elpapi42/pi-observational-memory)
+extension.
+
+---
+
 ## License
 
 MIT
