@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg-link
+.Python
+*.manifest
+*.spec
+
+# Virtual environments
+.env
+.venv
+venv/
+ENV/
+env/
+
+# Hermes ledger database (user data, not committed)
+om_ledger.db
+*.db
+
+# IDE
+.idea/
+.vscode/
+*.sw[po]
+*~
+
+# OS
+.DS_Store
+Thumbs.db

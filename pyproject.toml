@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "hermes-observational-memory"
+version = "1.0.0"
+description = "Make long Hermes Agent sessions feel endless - observational memory engine plugin"
+authors = [
+    {name = "Forge & Donald", email = "forge@witt3rd.com"},
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pyyaml",
+]
+
+[project.urls]
+Homepage = "https://github.com/witt3rd/hermes-observational-memory"
+Repository = "https://github.com/witt3rd/hermes-observational-memory"
+Issues = "https://github.com/witt3rd/hermes-observational-memory/issues"
